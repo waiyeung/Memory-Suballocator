@@ -37,7 +37,22 @@ static vsize_t memory_size;   // number of bytes malloc'd in memory[]
 
 void sal_init(u_int32_t size)
 {
-   // TODO
+   memory_size = 8;
+   while (memory_size < size) memory_size *= 2;
+
+   free_list_ptr = 0;
+
+   memory = malloc(memory_size);
+   if (memory == NULL)
+   {
+      fprintf(stderr, "sal_init: insufficient memory");
+      abort();
+   }
+   free_header_t *newHeader = memory;
+   newHeader->magic = 0xDEADBEEF;
+   newHeader->size = memory_size;
+   newHeader->next = 0;
+   newHeader->prev = 0;
 }
 
 void *sal_malloc(u_int32_t n)
@@ -53,7 +68,10 @@ void sal_free(void *object)
 
 void sal_end(void)
 {
-   // TODO
+   free(memory);
+   memory = NULL;
+   free_list_ptr = 0;
+   memory_size = 0;
 }
 
 void sal_stats(void)
