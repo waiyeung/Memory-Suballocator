@@ -37,6 +37,8 @@ static vsize_t memory_size;   // number of bytes malloc'd in memory[]
 
 void sal_init(u_int32_t size)
 {
+	if(memory != NULL) break;
+
    memory_size = 8;
    while (memory_size < size) memory_size *= 2;
 
@@ -48,8 +50,9 @@ void sal_init(u_int32_t size)
       fprintf(stderr, "sal_init: insufficient memory");
       abort();
    }
+
    free_header_t *newHeader = memory;
-   newHeader->magic = 0xDEADBEEF;
+   newHeader->magic = MAGIC_FREE;
    newHeader->size = memory_size;
    newHeader->next = 0;
    newHeader->prev = 0;
@@ -57,8 +60,58 @@ void sal_init(u_int32_t size)
 
 void *sal_malloc(u_int32_t n)
 {
-   // TODO
-   return NULL; // temporarily
+	//search for minimum suitable free region
+	if ((memory+free_list_ptr)->magic != MAGIC_FREE)
+   {
+   		fprintf(stderr, "Memory corruption");
+			abort();
+   }
+
+	n += HEADER_SIZE;
+
+	vaddr_t min = -1;
+	if ((memory+free_list_ptr)->size >= n)
+   {
+   		min = free_list_ptr;
+   }
+
+	vaddr_t curr = (memory+free_list_ptr)->next;
+	while(curr != free_list_ptr)
+	{
+		if ((memory+curr)->magic != MAGIC_FREE)
+   	{
+   		fprintf(stderr, "Memory corruption");
+			abort();
+   	}
+   	if ((memory+curr)->size <= (memory+min)->size && (memory+curr)->size >= n)
+   	{
+   		min = curr;
+   	}
+   	curr = (memory+curr)->next;
+	}
+
+	//split regions
+	if (min == -1) return NULL; else
+	{
+		vsize_t currSize = (memory+min)->size;
+		vaddr_t prev = min;
+		while(currSize >= n * 2)
+		{
+			currSize /= 2;
+			(memory+min)->size = currSize;
+			free_header_t *newHeader = (memory + min + currSize);
+			newHeader->magic = MAGIC_FREE;
+   		newHeader->size = currSize;
+  			newHeader->next = min;
+   		newHeader->prev = min;
+		}
+		if ((memory+curr)->next == curr) return NULL; else
+		{
+			(memory+curr)->magic = MAGIC_ALLOC;
+			return ((void*)(memory + curr + HEADER_SIZE));
+		}
+	}
+   
 }
 
 void sal_free(void *object)
