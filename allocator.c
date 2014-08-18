@@ -37,7 +37,7 @@ static vsize_t memory_size;   // number of bytes malloc'd in memory[]
 
 void sal_init(u_int32_t size)
 {
-	if(memory != NULL) break;
+	if(memory != NULL) abort();
 
    memory_size = 8;
    while (memory_size < size) memory_size *= 2;
@@ -51,7 +51,7 @@ void sal_init(u_int32_t size)
       abort();
    }
 
-   free_header_t *newHeader = memory;
+   free_header_t *newHeader = (free_header_t*)memory;
    newHeader->magic = MAGIC_FREE;
    newHeader->size = memory_size;
    newHeader->next = 0;
@@ -61,54 +61,62 @@ void sal_init(u_int32_t size)
 void *sal_malloc(u_int32_t n)
 {
 	//search for minimum suitable free region
-	if ((memory+free_list_ptr)->magic != MAGIC_FREE)
-   {
-   		fprintf(stderr, "Memory corruption");
-			abort();
-   }
-
 	n += HEADER_SIZE;
+	free_header_t * target = NULL; //holding min
+   free_header_t * startpoint = (void*)(memory + free_list_ptr);
+   free_header_t * curr = startpoint;
 
-	vaddr_t min = -1;
-	if ((memory+free_list_ptr)->size >= n)
+   if (curr->magic != MAGIC_FREE)
    {
-   		min = free_list_ptr;
+         fprintf(stderr, "Memory corruption");
+         abort();
    }
 
-	vaddr_t curr = (memory+free_list_ptr)->next;
-	while(curr != free_list_ptr)
+	if (curr->size >= n)
+   {
+   		target = curr;
+   }
+
+	curr = (void*)(memory + curr->next);
+	while(curr != startpoint)
 	{
-		if ((memory+curr)->magic != MAGIC_FREE)
+		if (curr->magic != MAGIC_FREE)
    	{
    		fprintf(stderr, "Memory corruption");
 			abort();
    	}
-   	if ((memory+curr)->size <= (memory+min)->size && (memory+curr)->size >= n)
+   	if (curr->size <= target->size && curr->size >= n)
    	{
-   		min = curr;
+   		target = curr;
    	}
-   	curr = (memory+curr)->next;
+   	curr = (void*)(memory + curr->next);
 	}
 
 	//split regions
-	if (min == -1) return NULL; else
+	if (target == NULL) return NULL; else   //no sufficiency space
 	{
-		vsize_t currSize = (memory+min)->size;
-		vaddr_t prev = min;
-		while(currSize >= n * 2)
+		while(target->size >= n * 2)
 		{
-			currSize /= 2;
-			(memory+min)->size = currSize;
-			free_header_t *newHeader = (memory + min + currSize);
-			newHeader->magic = MAGIC_FREE;
-   		newHeader->size = currSize;
-  			newHeader->next = min;
-   		newHeader->prev = min;
+			target->size /= 2;			
+			curr = (void*)(target + target->size);
+			curr->magic = MAGIC_FREE;
+   		curr->size = target->size;
+  			curr->next = target->next;
+   		curr->prev = (void*)(target - startpoint + 1);
+         target->next = (void*)(curr->prev + prev->size);
+         target = curr;
 		}
-		if ((memory+curr)->next == curr) return NULL; else
+
+      //return finally result, return null if curr is the only free region
+		if (target->next == target->prev) return NULL; else
 		{
-			(memory+curr)->magic = MAGIC_ALLOC;
-			return ((void*)(memory + curr + HEADER_SIZE));
+			target->magic = MAGIC_ALLOC;
+         curr = (void*)(memory + target->prev); //curr used as dummy buffer
+         curr->next = target->next;
+         curr = (void*)(memory + target->next);
+         curr->prev = target->prev;         
+         if(curr == startpoint) free_list_ptr = curr->next;
+			return ((void*)(curr + HEADER_SIZE));
 		}
 	}
    
