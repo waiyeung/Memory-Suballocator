@@ -72,71 +72,84 @@ void *sal_malloc(u_int32_t n) {
         abort();
     }
 
-    // search for appropriate minimum free region
-    vsize_t N = n + HEADER_SIZE;    //actual size required include header
+    // actual size required including header
+    vsize_t memSize = n + HEADER_SIZE;    
     free_header_t *target = NULL;
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
     free_header_t *curr = startpoint;
 
+    // check the magic header to ensure memory is not corrupted
     if (curr->magic != MAGIC_FREE) {
         fprintf(stderr, "Memory corruption");
         abort();
     }
-
-    if (curr->size >= N) {
+    
+    // initialise target to be curr and change it if we find a smaller region as it
+    // traverses the free list
+    if (curr->size >= memSize) {
         target = curr;
     }
-
-    curr = (free_header_t *)(memory + curr->next);
-    while (curr != startpoint) {
+    
+    // traverse the entire free list trying to find the smallest region that will
+    // fit memSize
+    for (curr = (free_header_t *)(memory + curr->next); curr != startpoint; 
+        curr = (free_header_t *)(memory + curr->next)) {
         if (curr->magic != MAGIC_FREE) {
             fprintf(stderr, "Memory corruption");
             abort();
         }
 
-        if ((curr->size < target->size) && (curr->size >= N)) {
+        if ((curr->size < target->size) && (curr->size >= memSize)) {
             target = curr;
         }
-
-        curr = (free_header_t *)(memory + curr->next);
     }
 
-
-    // continue iff there is an appropriate space
     void *returnValue = NULL;
-
+    
+    // only if there is a memory region that will fit memSize
     if (target != NULL) {
      
-        // spilt target to appropriate size
+        // get index to target (from memory[])
         vlink_t targetLink = (vlink_t)((byte *)target - (byte *)memory);
-        free_header_t *split;
-
-        while (target->size >= N * 2) {
+        
+        // continuously split the target until we get a region that is the power of 2
+        // just larger than memSize
+        while (target->size >= memSize * 2) {
+            // target <-> split <-> after (schematic of memory after split)
+            free_header_t *split = (free_header_t *) ((byte *)target + target->size);            
+            free_header_t *after = (free_header_t *) (memory + target->next);
+            
             target->size /= 2;
-            split = (free_header_t *)((byte *)target + target->size);
             split->magic = MAGIC_FREE;
             split->size = target->size;
             split->next = target->next;
-            split->prev = targetLink;
+            split->prev = targetLink;            
+            
+            // change after->prev to split's index
+            after->prev = targetLink + target->size;
+            // change target->next to split
             target->next = targetLink + target->size;
+            
             // if there is one free region left before splitting
-            // link targer_.prev to the new split region
+            // set target->prev to the new split region
             if (target->prev == targetLink) {
                 target->prev = target->next;
             }
         }
         
 
-        // continue if there are more then 1 free regions after splitting
-        if (target->next != targetLink) {
+        // continue only if there are more than 1 free regions after splitting
+        // otherwise return default value of returnValue which is NULL
+        if ((target->next != targetLink) && (target->prev != targetLink)) {
      
             target->magic = MAGIC_ALLOC;
-
-            //curr = the region just before target
+            
+            // take out the allocated region from the link by changing the links
+            // before and after target
+            // curr = the region just before target
             curr = (free_header_t *)(memory + target->prev);
             curr->next = target->next;
-
-            //curr = the region just after target
+            // curr = the region just after target
             curr = (free_header_t *)(memory + target->next);  
             curr->prev = target->prev;
 
