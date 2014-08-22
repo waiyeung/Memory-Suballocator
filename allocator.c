@@ -161,38 +161,44 @@ void *sal_malloc(u_int32_t n) {
 }
 
 void sal_free(void *object) {
-    //create a pointer to the region
-    free_header_t *obj_ptr = (free_header_t *)(object - HEADER_SIZE);
+    //create a pointer and index to the region
+    free_header_t *objPtr = (free_header_t *)(object - HEADER_SIZE);
+    vaddr_t objAddr = ((byte *) object) - memory;
 
-    //check magic number
-    if (obj_ptr->magic != MAGIC_ALLOC)
-    {
+    //check magic number to ensure freeing valid memory
+    if (objPtr->magic != MAGIC_ALLOC) {
         fprintf(stderr, "Attempt to free non-allocated memory");
         abort();
     }
 
-    //search regions to be inserted in between
     free_header_t *prev = NULL;
-    free_header_t *curr = (free_header_t *)(memory + free_list_ptr);
-
-    while(curr < obj_ptr && prev < curr) {
-        prev = curr;
-        curr = (free_header_t *)(memory + curr->next);
+    free_header_t *after = (free_header_t *)(memory + free_list_ptr);
+    
+    // traverse the list until prev is the memory block before the block that is to be removed
+    // and after is the block after (cyclically)
+    while(prev < objPtr && prev < after) {
+        prev = after;
+        after = (free_header_t *)(memory + after->next);
     }
-
-    if (prev == NULL){
-        //insert at first position
-
-    } else if (prev > curr){
-        //insert at last position
-
-    } else {
-        //insert at between prev & curr
-
+    
+    if (prev == NULL){ 
+        // i.e. insert at first position
+        // prev will be the last memory block i.e. the block linked by after->prev
+        prev = (free_header_t *) (memory + after->prev);
     }
-    obj_ptr->magic = MAGIC_FREE;
+    
+    vaddr_t prevAddr = ((byte *) prev) - memory;
+    vaddr_t afterAddr = ((byte *) after) - memory;
+        
+    prev->next = objAddr;
+    after->prev = objAddr;
+    objPtr->next = afterAddr;
+    objPtr->prev = prevAddr;
+    
+    // 'deallocate' the memory block
+    objPtr->magic = MAGIC_FREE;
 
-    //call sal_merge()
+    //sal_merge();
 }
 
 void sal_merge(void *id) {
