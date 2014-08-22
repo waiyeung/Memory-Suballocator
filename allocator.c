@@ -110,7 +110,7 @@ void *sal_malloc(u_int32_t n) {
     if (target != NULL) {
      
         // get index to target (from memory[])
-        vlink_t targetLink = (vlink_t)((byte *)target - (byte *)memory);
+        vaddr_t targetAddr = (vaddr_t)((byte *)target - (byte *)memory);
         
         // continuously split the target until we get a region that is the power of 2
         // just larger than memSize
@@ -123,24 +123,18 @@ void *sal_malloc(u_int32_t n) {
             split->magic = MAGIC_FREE;
             split->size = target->size;
             split->next = target->next;
-            split->prev = targetLink;            
+            split->prev = targetAddr;            
             
             // change after->prev to split's index
-            after->prev = targetLink + target->size;
+            after->prev = targetAddr + target->size;
             // change target->next to split
-            target->next = targetLink + target->size;
-            
-            // if there is one free region left before splitting
-            // set target->prev to the new split region
-            if (target->prev == targetLink) {
-                target->prev = target->next;
-            }
+            target->next = targetAddr + target->size;
         }
         
 
         // continue only if there are more than 1 free regions after splitting
         // otherwise return default value of returnValue which is NULL
-        if ((target->next != targetLink) && (target->prev != targetLink)) {
+        if ((target->next != targetAddr) && (target->prev != targetAddr)) {
      
             target->magic = MAGIC_ALLOC;
             
@@ -152,8 +146,10 @@ void *sal_malloc(u_int32_t n) {
             // curr = the region just after target
             curr = (free_header_t *)(memory + target->next);  
             curr->prev = target->prev;
-
-            if (curr == startpoint) {
+            
+            // if free_list_ptr is being allocated, it needs to be changed to the next
+            // available region
+            if (target == startpoint) {
                 free_list_ptr = target->next;
             }
 
@@ -200,9 +196,7 @@ void sal_free(void *object) {
 }
 
 void sal_merge(void *id) {
-    //Merging
-    //(curr's index/curr->size) odd:bottom even:top
-
+    
 }
 
 void sal_end(void) {
