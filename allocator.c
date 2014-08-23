@@ -17,11 +17,16 @@
 #define MAGIC_ALLOC 0xBEEFDEAD
 #define MIN_REGION_SIZE 4
 #define FREE_PTR_START 0
+#define TRUE 1
+#define FALSE 0
+#define BEFORE 0
+#define AFTER 1
 
 typedef unsigned char byte;
 typedef u_int32_t vlink_t;
 typedef u_int32_t vsize_t;
 typedef u_int32_t vaddr_t;
+typedef int boolean;
 
 typedef struct free_list_header {
     u_int32_t magic;    // ought to contain MAGIC_FREE
@@ -30,11 +35,12 @@ typedef struct free_list_header {
     vlink_t prev;       // memory[] index of previous free block
 } free_header_t;
 
+static int getMergeDirection(vaddr_t, vaddr_t, int, int);
+
 // Global data
 static byte *memory = NULL;      // pointer to start of suballocator memory
 static vaddr_t free_list_ptr;    // index in memory[] of first block in free list
 static vsize_t memory_size;      // number of bytes malloc'd in memory[]
-
 
 void sal_init(u_int32_t size) {
     // Do nothing if allocator has already been initiated
@@ -110,7 +116,7 @@ void *sal_malloc(u_int32_t n) {
     if (target != NULL) {
      
         // get index to target (from memory[])
-        vaddr_t targetAddr = (vaddr_t)((byte *)target - (byte *)memory);
+        vaddr_t targetAddr = (vaddr_t) ((byte *)target - memory);
         
         // continuously split the target until we get a region that is the power of 2
         // just larger than memSize
@@ -162,7 +168,7 @@ void *sal_malloc(u_int32_t n) {
 
 void sal_free(void *object) {
     //create a pointer and index to the region
-    free_header_t *objPtr = (free_header_t *)(object - HEADER_SIZE);
+    free_header_t *objPtr = (free_header_t *)((byte *) object - HEADER_SIZE);
     vaddr_t objAddr = ((byte *) object) - memory;
 
     //check magic number to ensure freeing valid memory
@@ -174,13 +180,12 @@ void sal_free(void *object) {
     free_header_t *prev = NULL;
     free_header_t *after = (free_header_t *)(memory + free_list_ptr);
     
-    // traverse the list until prev is the memory block before the block that is to be removed
-    // and after is the block after (cyclically)
+    // traverse the list until prev is the free memory block before the block that is to be removed
+    // and after is the free block after (cyclically)
     while(prev < objPtr && prev < after) {
         prev = after;
         after = (free_header_t *)(memory + after->next);
-    }
-    
+    }    
     if (prev == NULL){ 
         // i.e. insert at first position
         // prev will be the last memory block i.e. the block linked by after->prev
@@ -189,7 +194,8 @@ void sal_free(void *object) {
     
     vaddr_t prevAddr = ((byte *) prev) - memory;
     vaddr_t afterAddr = ((byte *) after) - memory;
-        
+    
+    // link in the deallocated block into the free list
     prev->next = objAddr;
     after->prev = objAddr;
     objPtr->next = afterAddr;
@@ -202,8 +208,119 @@ void sal_free(void *object) {
 }
 
 void sal_merge(void *id) {
+    // if a merge occurs, newId will point to the finished merged block so sal_merge
+    // can be called on it (if applicable) as there may be more possible merges
+    void *newId = NULL;
     
+    free_header_t *objPtr = (free_header_t *)((byte *) id - HEADER_SIZE);
+    vaddr_t objAddr = (byte *) objPtr - memory;
+    // the free blocks before and after the block to be merged
+    free_header_t *prevFree = NULL;
+    free_header_t *afterFree = (free_header_t *)(memory + free_list_ptr);
+    
+    // traverse the list until prev is the free memory block before the block that is to be merged
+    // and after is the free block after (cyclically)
+    while(prevFree < objPtr && prevFree < afterFree) {
+        prevFree = afterFree;
+        afterFree = (free_header_t *)(memory + afterFree->next);
+    }    
+    if (prevFree == NULL){ 
+        // i.e. first position
+        // prev will be the last memory block i.e. the block linked by afterFree->prev
+        prevFree = (free_header_t *) (memory + afterFree->prev);
+    }
+    
+    vaddr_t prevFreeAddr = (byte *) prevFree - memory;
+    vaddr_t afterFreeAddr = (byte *) afterFree - memory;
+    
+    // Three cases assuming both blocks on either side of objPtr are free
+    // 1. a larger block on one side and the block to be merged with on the other side
+    // 2. a smaller block on one side and a block of equal size on the other (need to check which
+    //    one to merge with)
+    // 3. two blocks of equal sizing to the middle block (need to check which one to merge with)
+    
+    // prevFree or afterFree will only be mergeable if their size is equal to id's size
+    // and if they are directly adjacent in terms of memory position
+    // modulus is used to handle memory wraparound (when id is the first or last block)
+    boolean prevFreeMergeable = (prevFree->size == objPtr->size) &&
+        (((byte *) memory + ((prevFreeAddr + prevFree->size) % memory_size)) == (byte *) id);      
+    boolean afterFreeMergeable = (afterFree->size == objPtr->size) &&
+        (((byte *) memory + ((afterFreeAddr - objPtr->size) % memory_size)) == (byte *) id);
+    
+    if (prevFreeMergeable || afterFreeMergeable) {
+        // i.e. only one can be merged with id
+        // the block to be merged with id will be pointed by mergeTarget
+        free_header_t *mergeTarget = NULL;
+        
+        // If the other block that's not getting merged is larger than the to be merged block
+        // the other adjacent block must be the one getting merged.
+        // Small optimisation rather than having to use the comparatively expensive getMergeDirection
+        // function for first case.
+        if ((prevFree->size == objPtr->size) && (afterFree->size > objPtr->size)) {
+            mergeTarget = prevFree;
+        } else if ((afterFree->size == objPtr->size) && (prevFree->size > objPtr->size)) {
+            mergeTarget = afterFree;
+        } else if (getMergeDirection(prevFreeAddr, objAddr, 0, memory_size) == BEFORE) {
+            mergeTarget = prevFree;
+        } else {
+            mergeTarget = afterFree;
+        }             
+        
+        // now do merging of mergeTarget and objPtr
+        // TODO: CAN BE PUT INTO HELPER FUNCTION
+        if (mergeTarget < objPtr) {
+            // i.e. prevFree will be merged
+            // mergeTarget/beforeFree will now the entry in the free list
+            free_header_t *newBefore = (free_header_t *)(memory + prevFree->prev);
+            mergeTarget->size *= 2;
+            mergeTarget->next = afterFreeAddr;
+            mergeTarget->prev = (vlink_t) ((byte *) newBefore - memory);
+            afterFree->prev = (vlink_t) ((byte *) mergeTarget - memory);
+            newBefore->next = (vlink_t) ((byte *) mergeTarget - memory);
+            newId = (void *) ((byte *) mergeTarget + HEADER_SIZE);
+        } else if (mergeTarget > objPtr) {
+            // i.e. afterFree will be merged
+            // objPtr will be the entry in the free list
+            free_header_t *newAfter = (free_header_t *)(memory + afterFree->next);
+            objPtr->size *= 2;
+            mergeTarget->prev = prevFreeAddr;
+            mergeTarget->next = (vlink_t) ((byte *) newAfter - memory);            
+            afterFree->prev = (vlink_t) ((byte *) mergeTarget - memory);
+            newAfter->prev = (vlink_t) ((byte *) mergeTarget - memory);
+            newId = id; // i.e. (void *) ((byte *) objPtr + HEADER_SIZE)
+        }
+    }
+    
+    // recursively call sal_merge until there are no longer any merge-able blocks
+    if (newId != NULL) {
+        sal_merge(newId);
+    }
 }
+
+// Returns 0/BEFORE or 1/AFTER depending on which objPtr needs to merge with.
+// It works by recursively dividing the entire allocated memory block and seeing
+// if prevFree or objPtr lies on the halfway point or at the bounds. If halfway == prevFreeAddr 
+// or prevFreeAddr == begin, it means that it has to merge with prevFree. Vice versa for objAddr
+// and merging with after. This should work with the last 2 cases in the above comment.
+static int getMergeDirection(vaddr_t prevFreeAddr, vaddr_t objAddr, int begin, int end) {
+    int direction = BEFORE;
+    int halfway = (end - begin) / 2;
+    if (objAddr == begin || objAddr == halfway) {
+        direction = AFTER;
+    } else if (prevFreeAddr == begin || prevFreeAddr == halfway) {
+        direction = BEFORE;
+    } else {
+        // if none of the addr lie on significant areas, keep halving the bounded area
+        if (prevFreeAddr < halfway) {
+            // in the first half
+            direction = getMergeDirection(prevFreeAddr, objAddr, begin, halfway);
+        } else {
+            // in the second half
+            direction = getMergeDirection(prevFreeAddr, objAddr, halfway, end);
+        }
+    }
+    return direction; 
+}   
 
 void sal_end(void) {
     free(memory);
