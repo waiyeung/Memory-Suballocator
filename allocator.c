@@ -23,18 +23,19 @@
 #define AFTER 1
 
 typedef unsigned char byte;
-typedef u_int32_t vlink_t;
-typedef u_int32_t vsize_t;
-typedef u_int32_t vaddr_t;
+typedef uint32_t vlink_t;
+typedef uint32_t vsize_t;
+typedef uint32_t vaddr_t;
 typedef int boolean;
 
 typedef struct free_list_header {
-    u_int32_t magic;    // ought to contain MAGIC_FREE
+    uint32_t magic;    // ought to contain MAGIC_FREE
     vsize_t size;       // # bytes in this block (including header)
     vlink_t next;       // memory[] index of next free block
     vlink_t prev;       // memory[] index of previous free block
 } free_header_t;
 
+void sal_merge(void *);
 static int getMergeDirection(vaddr_t, vaddr_t, int, int);
 
 // Global data
@@ -42,7 +43,7 @@ static byte *memory = NULL;      // pointer to start of suballocator memory
 static vaddr_t free_list_ptr;    // index in memory[] of first block in free list
 static vsize_t memory_size;      // number of bytes malloc'd in memory[]
 
-void sal_init(u_int32_t size) {
+void sal_init(uint32_t size) {
     // Do nothing if allocator has already been initiated
     if (memory == NULL) {
 
@@ -72,7 +73,7 @@ void sal_init(u_int32_t size) {
     }
 }
 
-void *sal_malloc(u_int32_t n) {
+void *sal_malloc(uint32_t n) {
     // The size of every region must be a power of two and greater than 4 bytes
     if (n <= MIN_REGION_SIZE) {
         abort();
@@ -80,9 +81,9 @@ void *sal_malloc(u_int32_t n) {
 
     // actual size required including header
     vsize_t memSize = n + HEADER_SIZE;    
-    free_header_t *target = NULL;
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
     free_header_t *curr = startpoint;
+    free_header_t *target = NULL;
 
     // check the magic header to ensure memory is not corrupted
     if (curr->magic != MAGIC_FREE) {
@@ -104,8 +105,9 @@ void *sal_malloc(u_int32_t n) {
             fprintf(stderr, "Memory corruption");
             abort();
         }
-
-        if ((curr->size < target->size) && (curr->size >= memSize)) {
+        if ((target == NULL) && (curr->size >= memSize)) {
+            target = curr;
+        } else if ((curr->size < target->size) && (curr->size >= memSize)) {
             target = curr;
         }
     }
@@ -122,18 +124,17 @@ void *sal_malloc(u_int32_t n) {
         // just larger than memSize
         while (target->size >= memSize * 2) {
             // target <-> split <-> after (schematic of memory after split)
-            free_header_t *split = (free_header_t *) ((byte *)target + target->size);            
-            free_header_t *after = (free_header_t *) (memory + target->next);
-            
             target->size /= 2;
+            free_header_t *split = (free_header_t *) ((byte *)target + target->size);            
+            free_header_t *after = (free_header_t *) (memory + target->next);            
+            
             split->magic = MAGIC_FREE;
             split->size = target->size;
             split->next = target->next;
             split->prev = targetAddr;            
             
-            // change after->prev to split's index
+            // change after->prev and target->next to split's index
             after->prev = targetAddr + target->size;
-            // change target->next to split
             target->next = targetAddr + target->size;
         }
         
@@ -168,29 +169,23 @@ void *sal_malloc(u_int32_t n) {
 
 void sal_free(void *object) {
     //create a pointer and index to the region
-    free_header_t *objPtr = (free_header_t *)((byte *) object - HEADER_SIZE);
-    vaddr_t objAddr = ((byte *) object) - memory;
+    free_header_t *objPtr = (free_header_t *) ((byte *) object - HEADER_SIZE);
+    vaddr_t objAddr = ((byte *) objPtr) - memory;
 
     //check magic number to ensure freeing valid memory
     if (objPtr->magic != MAGIC_ALLOC) {
         fprintf(stderr, "Attempt to free non-allocated memory");
         abort();
     }
-
-    free_header_t *prev = NULL;
-    free_header_t *after = (free_header_t *)(memory + free_list_ptr);
     
-    // traverse the list until prev is the free memory block before the block that is to be removed
-    // and after is the free block after (cyclically)
-    while(prev < objPtr && prev < after) {
-        prev = after;
-        after = (free_header_t *)(memory + after->next);
+    // traverse the list until after is the next free block after object and 
+    // then set prev to be the free block before object
+    free_header_t *prev = NULL;
+    free_header_t *after = (free_header_t *) (memory + free_list_ptr);
+    while (after <= objPtr) {
+        after = (free_header_t *) (memory + after->next);
     }    
-    if (prev == NULL){ 
-        // i.e. insert at first position
-        // prev will be the last memory block i.e. the block linked by after->prev
-        prev = (free_header_t *) (memory + after->prev);
-    }
+    prev = (free_header_t *) (memory + after->prev);
     
     vaddr_t prevAddr = ((byte *) prev) - memory;
     vaddr_t afterAddr = ((byte *) after) - memory;
@@ -204,31 +199,27 @@ void sal_free(void *object) {
     // 'deallocate' the memory block
     objPtr->magic = MAGIC_FREE;
 
-    //sal_merge();
+    sal_merge(objPtr);
 }
 
+// id that gets passed in is the beginning of the header
 void sal_merge(void *id) {
     // if a merge occurs, newId will point to the finished merged block so sal_merge
     // can be called on it (if applicable) as there may be more possible merges
     void *newId = NULL;
     
-    free_header_t *objPtr = (free_header_t *)((byte *) id - HEADER_SIZE);
+    free_header_t *objPtr = (free_header_t *) id;
     vaddr_t objAddr = (byte *) objPtr - memory;
     // the free blocks before and after the block to be merged
     free_header_t *prevFree = NULL;
-    free_header_t *afterFree = (free_header_t *)(memory + free_list_ptr);
+    free_header_t *afterFree = (free_header_t *) (memory + free_list_ptr);
     
     // traverse the list until prev is the free memory block before the block that is to be merged
     // and after is the free block after (cyclically)
-    while(prevFree < objPtr && prevFree < afterFree) {
-        prevFree = afterFree;
-        afterFree = (free_header_t *)(memory + afterFree->next);
+    while (afterFree <= objPtr) {
+        afterFree = (free_header_t *) (memory + afterFree->next);
     }    
-    if (prevFree == NULL){ 
-        // i.e. first position
-        // prev will be the last memory block i.e. the block linked by afterFree->prev
-        prevFree = (free_header_t *) (memory + afterFree->prev);
-    }
+    prevFree = (free_header_t *) (memory + objPtr->prev);
     
     vaddr_t prevFreeAddr = (byte *) prevFree - memory;
     vaddr_t afterFreeAddr = (byte *) afterFree - memory;
@@ -277,22 +268,30 @@ void sal_merge(void *id) {
             mergeTarget->prev = (vlink_t) ((byte *) newBefore - memory);
             afterFree->prev = (vlink_t) ((byte *) mergeTarget - memory);
             newBefore->next = (vlink_t) ((byte *) mergeTarget - memory);
-            newId = (void *) ((byte *) mergeTarget + HEADER_SIZE);
+            newId = (void *) mergeTarget;
         } else if (mergeTarget > objPtr) {
             // i.e. afterFree will be merged
             // objPtr will be the entry in the free list
             free_header_t *newAfter = (free_header_t *)(memory + afterFree->next);
             objPtr->size *= 2;
-            mergeTarget->prev = prevFreeAddr;
-            mergeTarget->next = (vlink_t) ((byte *) newAfter - memory);            
-            afterFree->prev = (vlink_t) ((byte *) mergeTarget - memory);
-            newAfter->prev = (vlink_t) ((byte *) mergeTarget - memory);
-            newId = id; // i.e. (void *) ((byte *) objPtr + HEADER_SIZE)
-        }
+            objPtr->prev = prevFreeAddr;
+            objPtr->next = (vlink_t) ((byte *) newAfter - memory);         
+            prevFree->next = (vlink_t) ((byte *) objPtr - memory);
+            newAfter->prev = (vlink_t) ((byte *) objPtr - memory);
+            newId = (void *) objPtr;
+            
+            // change free_list_ptr to something valid as mergeTarget index will now longer
+            // be the beginning of a block, newId index will
+            vaddr_t mergeTargetAddr = (vaddr_t) ((byte *) mergeTarget - memory);
+            if (mergeTargetAddr == free_list_ptr) {
+                free_list_ptr = (vaddr_t) ((byte *) newId - memory);
+            }
+        }        
     }
     
     // recursively call sal_merge until there are no longer any merge-able blocks
-    if (newId != NULL) {
+    // (including when it gets merged to one contiguous block)
+    if ((newId != NULL) && (((free_header_t *) memory)->size != memory_size)) {
         sal_merge(newId);
     }
 }
