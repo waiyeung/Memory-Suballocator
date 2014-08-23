@@ -260,7 +260,8 @@ void sal_merge(void *id) {
         // now do merging of mergeTarget and objPtr
         // TODO: PROBABLY CAN BE PUT INTO HELPER FUNCTION / CURRENTLY VERY MESSY
         // TODO: CHECK IF THERE ARE MORE BUGS 
-        if (mergeTarget->next == objAddr && objPtr->prev == mergeTargetAddr) {
+        // TODO: BUG HERE WHEN MERGING THE ONLY TWO FREE BLOCKS INTO THE ONLY ONE BLOCK
+        /* if (mergeTarget->next == objAddr && objPtr->prev == mergeTargetAddr) {
             // i.e. when they merge, only one block remains in free list
             if (mergeTarget < objPtr) {
                 mergeTarget->size *= 2;
@@ -272,7 +273,8 @@ void sal_merge(void *id) {
                 objPtr->prev = objAddr;
                 free_list_ptr = objAddr;
             }
-        } else if (mergeTarget < objPtr) {
+        } else */ 
+        if (mergeTarget < objPtr) {
             // i.e. prevFree will be merged
             // mergeTarget/beforeFree will now the entry in the free list
             free_header_t *newBefore = (free_header_t *)(memory + prevFree->prev);
