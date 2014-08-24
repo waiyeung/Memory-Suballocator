@@ -344,10 +344,22 @@ void sal_end(void) {
 
 void sal_stats(void) {
     // Optional, but useful
-    printf("sal_stats\n");
+    printf("\nsal_stats\n");
     // we "use" the global variables here
     // just to keep the compiler quiet
-    //memory = memory;
-    //free_list_ptr = free_list_ptr;
-    //memory_size = memory_size;
+    printf("\n--Gobal variables--\n");
+    printf("memory: %p\n", memory);
+    printf("free_list_ptr: %u\n", free_list_ptr);
+    printf("memory_size: %u\n", memory_size);
+
+    printf("\n--Free list--\n");
+    free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
+    free_header_t *curr = startpoint;
+    printf("<START>\n");
+    do
+    {
+        printf("-->%u size: %u, next: %u, prev: %u\n", (unsigned int)curr - (unsigned int)memory, curr->size, curr->next, curr->prev);
+        curr = (free_header_t *) (memory + curr->next);
+    } while(curr != startpoint);
+    printf("<END>\n");
 }
