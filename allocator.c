@@ -48,8 +48,8 @@ void sal_init(uint32_t size) {
     if (memory == NULL) {
 
         // Convert size to a power of two if it isn't already 
-        // (the smallest that is larger than the input size)
-        memory_size = 2;
+        // the smallest that is larger than both the input size and HEADER_SIZE
+        memory_size = HEADER_SIZE;
         while (memory_size < size) {
             memory_size *= 2;
         }    
@@ -69,7 +69,6 @@ void sal_init(uint32_t size) {
         header->size = memory_size;
         header->next = FREE_PTR_START;
         header->prev = FREE_PTR_START;
-
     }
 }
 
@@ -84,37 +83,27 @@ void *sal_malloc(uint32_t n) {
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
     free_header_t *curr = startpoint;
     free_header_t *target = NULL;
-
-    // check the magic header to ensure memory is not corrupted
-    if (curr->magic != MAGIC_FREE) {
-        fprintf(stderr, "Memory corruption");
-        abort();
-    }
-    
-    // initialise target to be curr and change it if we find a smaller region as it
-    // traverses the free list
-    if (curr->size >= memSize) {
-        target = curr;
-    }
     
     // traverse the entire free list trying to find the smallest region that will
     // fit memSize
-    for (curr = (free_header_t *)(memory + curr->next); curr != startpoint; 
-        curr = (free_header_t *)(memory + curr->next)) {
+    do
+    {
         if (curr->magic != MAGIC_FREE) {
             fprintf(stderr, "Memory corruption");
             abort();
         }
-        if ((target == NULL) && (curr->size >= memSize)) {
-            target = curr;
-        } else if ((curr->size < target->size) && (curr->size >= memSize)) {
+        if (curr->size >= memSize && (target == NULL || curr->size < target->size)) 
+        {
             target = curr;
         }
-    }
+        curr = (free_header_t *)(memory + curr->next);
+    } while (curr != startpoint);
+
 
     void *returnValue = NULL;
     
     // only if there is a memory region that will fit memSize
+    // return NULL if (target == NULL)
     if (target != NULL) {
      
         // get index to target (from memory[])
@@ -163,7 +152,7 @@ void *sal_malloc(uint32_t n) {
             returnValue = (void *) ((byte *)target + HEADER_SIZE); 
         }
     } 
-
+    sal_stats();
     return returnValue;  
 }
 
@@ -171,6 +160,7 @@ void sal_free(void *object) {
     //create a pointer and index to the region
     free_header_t *objPtr = (free_header_t *) ((byte *) object - HEADER_SIZE);
     vaddr_t objAddr = ((byte *) objPtr) - memory;
+    printf("%u\n", objAddr);
 
     //check magic number to ensure freeing valid memory
     if (objPtr->magic != MAGIC_ALLOC) {
@@ -358,7 +348,7 @@ void sal_stats(void) {
     printf("<START>\n");
     do
     {
-        printf("-->%u size: %u, next: %u, prev: %u\n", (unsigned int)curr - (unsigned int)memory, curr->size, curr->next, curr->prev);
+        printf("Index-->%u size: %u, next: %u, prev: %u\n", (unsigned int)curr - (unsigned int)memory, curr->size, curr->next, curr->prev);
         curr = (free_header_t *) (memory + curr->next);
     } while(curr != startpoint);
     printf("<END>\n");
