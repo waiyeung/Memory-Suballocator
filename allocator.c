@@ -23,13 +23,13 @@
 #define AFTER 1
 
 typedef unsigned char byte;
-typedef uint32_t vlink_t;
-typedef uint32_t vsize_t;
-typedef uint32_t vaddr_t;
+typedef u_int32_t vlink_t;
+typedef u_int32_t vsize_t;
+typedef u_int32_t vaddr_t;
 typedef int boolean;
 
 typedef struct free_list_header {
-    uint32_t magic;    // ought to contain MAGIC_FREE
+    u_int32_t magic;    // ought to contain MAGIC_FREE
     vsize_t size;       // # bytes in this block (including header)
     vlink_t next;       // memory[] index of next free block
     vlink_t prev;       // memory[] index of previous free block
@@ -43,7 +43,7 @@ static byte *memory = NULL;      // pointer to start of suballocator memory
 static vaddr_t free_list_ptr;    // index in memory[] of first block in free list
 static vsize_t memory_size;      // number of bytes malloc'd in memory[]
 
-void sal_init(uint32_t size) {
+void sal_init(u_int32_t size) {
     // Do nothing if allocator has already been initiated
     if (memory == NULL) {
 
@@ -72,7 +72,7 @@ void sal_init(uint32_t size) {
     }
 }
 
-void *sal_malloc(uint32_t n) {
+void *sal_malloc(u_int32_t n) {
     // The size of every region must be a power of two and greater than 4 bytes
     if (n <= MIN_REGION_SIZE) {
         abort();
@@ -86,14 +86,12 @@ void *sal_malloc(uint32_t n) {
     
     // traverse the entire free list trying to find the smallest region that will
     // fit memSize
-    do
-    {
+    do {
         if (curr->magic != MAGIC_FREE) {
             fprintf(stderr, "Memory corruption");
             abort();
         }
-        if (curr->size >= memSize && (target == NULL || curr->size < target->size)) 
-        {
+        if (curr->size >= memSize && (target == NULL || curr->size < target->size)) {
             target = curr;
         }
         curr = (free_header_t *)(memory + curr->next);
@@ -214,11 +212,11 @@ void sal_merge(void *id) {
     vaddr_t prevFreeAddr = (byte *) prevFree - memory;
     vaddr_t afterFreeAddr = (byte *) afterFree - memory;
     
-    // Three cases assuming both blocks on either side of objPtr are free
-    // 1. a larger block on one side and the block to be merged with on the other side
-    // 2. a smaller block on one side and a block of equal size on the other (need to check which
-    //    one to merge with)
-    // 3. two blocks of equal sizing to the middle block (need to check which one to merge with)
+    // Two cases assuming both blocks on either side of objPtr are free
+    // 1. only one block on one side is mergeable while the other isn't 
+    //    therefore merge with that side
+    // 2. both blocks on either side are mergeable so need to check which side
+    //    to merge with
     
     // prevFree or afterFree will only be mergeable if their size is equal to id's size
     // and if they are directly adjacent in terms of memory position
@@ -228,23 +226,27 @@ void sal_merge(void *id) {
         (((byte *) memory + (afterFreeAddr - objPtr->size)) == (byte *) id);
     
     if (prevFreeMergeable || afterFreeMergeable) {
-        // i.e. only one can be merged with id
+        // i.e. only prev or after can be merged with id
         // the block to be merged with id will be pointed by mergeTarget
         free_header_t *mergeTarget = NULL;
         
-        // If the other block that's not getting merged is larger than the to be merged block
-        // the other adjacent block must be the one getting merged.
         // Small optimisation rather than having to use the comparatively expensive getMergeDirection
         // function for first case.
-        if ((prevFree->size == objPtr->size) && (afterFree->size > objPtr->size)) {
+        if (!afterFreeMergeable) {
+            // therefore must merge with prev
             mergeTarget = prevFree;
-        } else if ((afterFree->size == objPtr->size) && (prevFree->size > objPtr->size)) {
+        } else if (!prevFreeMergeable) {
+            // therefore must merge with after
             mergeTarget = afterFree;
-        } else if (getMergeDirection(prevFreeAddr, objAddr, 0, memory_size) == BEFORE) {
-            mergeTarget = prevFree;
         } else {
-            mergeTarget = afterFree;
-        }             
+            // at this point both prev and after are mergeable
+            // so we use getMergeDirection to determine which one to merge with
+            if (getMergeDirection(prevFreeAddr, objAddr, 0, memory_size) == BEFORE) {
+                mergeTarget = prevFree;
+            } else {
+                mergeTarget = afterFree;
+            }
+        }            
         vaddr_t mergeTargetAddr = (vaddr_t) ((byte *) mergeTarget - memory);
         
         // now do merging of mergeTarget and objPtr
@@ -333,10 +335,7 @@ void sal_end(void) {
 }
 
 void sal_stats(void) {
-    // Optional, but useful
     printf("\nsal_stats\n");
-    // we "use" the global variables here
-    // just to keep the compiler quiet
     printf("\n--Gobal variables--\n");
     printf("memory: %p\n", memory);
     printf("free_list_ptr: %u\n", free_list_ptr);
@@ -348,7 +347,7 @@ void sal_stats(void) {
     printf("<START>\n");
     do
     {
-        printf("Index-->%u size: %u, next: %u, prev: %u\n", (unsigned int)curr - (unsigned int)memory, curr->size, curr->next, curr->prev);
+        printf("Index-->%u size: %u, next: %u, prev: %u\n", (unsigned int) ((byte *) curr - memory), curr->size, curr->next, curr->prev);
         curr = (free_header_t *) (memory + curr->next);
     } while(curr != startpoint);
     printf("<END>\n");
