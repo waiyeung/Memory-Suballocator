@@ -38,7 +38,7 @@ typedef struct free_list_header {
 } free_header_t;
 
 void sal_merge(free_header_t *);
-static void merge(free_header_t *, free_header_t *, free_header_t *);
+static void mergeLink(free_header_t *, free_header_t *, free_header_t *);
 static void link(free_header_t *, free_header_t *, free_header_t *);
 static boolean oneFreeBlockRemaining(void);
 static direction getMergeDirection(free_header_t *, vaddr_t, vaddr_t);
@@ -240,13 +240,13 @@ void sal_merge(free_header_t *objPtr) {
             // i.e. prevFree will be merged
             // mergeTarget/beforeFree will now the entry in the free list
             free_header_t *newBefore = (free_header_t *) (memory + prevFree->prev);
-            merge(newBefore, mergeTarget, afterFree);
+            mergeLink(newBefore, mergeTarget, afterFree);
             newId = (void *) mergeTarget;
         } else {
             // i.e. afterFree will be merged as mergeTarget > objPtr
             // objPtr will be the entry in the free list
             free_header_t *newAfter = (free_header_t *) (memory + afterFree->next);
-            merge(prevFree, objPtr, newAfter);
+            mergeLink(prevFree, objPtr, newAfter);
             newId = (void *) objPtr;
         }        
     }
@@ -267,7 +267,7 @@ static boolean oneFreeBlockRemaining(void) {
     return ((next == start) && (prev == start));
 }
 
-static void merge(free_header_t *before, free_header_t *obj, free_header_t *after) {
+static void mergeLink(free_header_t *before, free_header_t *obj, free_header_t *after) {
     obj->size *= 2;
     vlink_t objLink = (vlink_t) ((byte *) obj - memory);
     if (before == obj || after == obj) {
