@@ -75,11 +75,9 @@ void sal_init(u_int32_t size) {
         header->next = FREE_PTR_START;
         header->prev = FREE_PTR_START;
     }
-
 }
 
 void *sal_malloc(u_int32_t n) {
-
     // "memSize" : actual size required including header
     vsize_t memSize = n + HEADER_SIZE;    
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
@@ -104,7 +102,6 @@ void *sal_malloc(u_int32_t n) {
             curr = (free_header_t *)(memory + curr->next);
         } while (curr != startpoint);
     }
-
     
     // only if there is a memory region that will fit memSize
     // return NULL if (target == NULL)
@@ -154,8 +151,8 @@ void *sal_malloc(u_int32_t n) {
 
             returnValue = (void *) ((byte *)target + HEADER_SIZE); 
         }
-    } 
-
+    }
+    
     return returnValue;  
 }
 
@@ -202,12 +199,8 @@ void sal_free(void *object) {
     sal_merge(obj);
 }
 
-// obj that gets passed in is the beginning of the header
+// obj: the beginning of the block that may be merged
 void sal_merge(free_header_t *obj) {
-    // if a merge occurs, newId will point to the finished merged block so sal_merge
-    // can be called on it (if applicable) as there may be more possible merges
-    void *newId = NULL;
-    
     // the free blocks before and after obj (which is free itself)
     free_header_t *beforeFree = (free_header_t *) (memory + obj->prev);
     free_header_t *afterFree = (free_header_t *) (memory + obj->next);
@@ -222,7 +215,11 @@ void sal_merge(free_header_t *obj) {
     boolean afterFreeMergeable = (afterFree->size == obj->size) &&
         (((byte *) memory + (afterFreeAddr - obj->size)) == (byte *) obj);
     
-    if (beforeFreeMergeable || afterFreeMergeable) {    
+    if (beforeFreeMergeable || afterFreeMergeable) {
+    
+        // if a merge occurs, newId will point to the finished merged block so sal_merge
+        // can be called on it (if applicable) as there may be more possible merges
+        void *newId = NULL;
         // determine which direction obj MUST merge with (i.e. the one that it split with)
         direction d = getMergeDirection(obj, MEMORY_START, memory_size);
         
@@ -238,14 +235,14 @@ void sal_merge(free_header_t *obj) {
             free_header_t *newBefore = (free_header_t *) (memory + beforeFree->prev);
             mergeLink(newBefore, beforeFree, afterFree);
             newId = (void *) beforeFree;
-        }       
-    }
-    
-    // recursively call sal_merge until there are no longer any merge-able blocks
-    // or it is the sole remaining free block
-    if ((newId != NULL) && (!oneFreeBlockRemaining())) {
-        sal_merge(newId);
-    }
+        }
+        
+        // recursively call sal_merge until there are no longer any merge-able blocks
+        // or it is the sole remaining free block
+        if ((newId != NULL) && (!oneFreeBlockRemaining())) {
+            sal_merge(newId);
+        }     
+    }    
 }
 
 // Checks whether the first free block's next and prev point to itself;
@@ -262,6 +259,7 @@ static boolean oneFreeBlockRemaining(void) {
 static void mergeLink(free_header_t *before, free_header_t *obj, free_header_t *after) {
     obj->size *= 2;
     vlink_t objLink = (vlink_t) ((byte *) obj - memory);
+    
     if (before == obj || after == obj) {
         // there were two free block before merging so there will only be
         // one free block after merging (requires separate linking)
@@ -291,6 +289,7 @@ static direction getMergeDirection(free_header_t *obj, vaddr_t begin, vaddr_t en
     direction d;
     vaddr_t halfway = (end - begin) / 2;
     vaddr_t objAddr = (byte *) obj - memory;
+    
     if ((objAddr == begin) || (objAddr == halfway)) {
         d = AFTER;
     } else if ((objAddr == begin + obj->size) || (objAddr == halfway + obj->size)) {
@@ -305,6 +304,7 @@ static direction getMergeDirection(free_header_t *obj, vaddr_t begin, vaddr_t en
             d = getMergeDirection(obj, (begin + halfway), end);
         }
     }
+    
     return d; 
 }   
 
@@ -326,8 +326,7 @@ void sal_stats(void) {
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
     free_header_t *curr = startpoint;
     printf("<START>\n");
-    do
-    {
+    do {
         printf("%u --> size: %u, next: %u, prev: %u\n", (unsigned int) ((byte *) curr - memory), curr->size, curr->next, curr->prev);
         curr = (free_header_t *) (memory + curr->next);
     } while(curr != startpoint);
