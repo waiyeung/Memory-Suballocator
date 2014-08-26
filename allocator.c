@@ -250,11 +250,13 @@ void sal_merge(free_header_t *obj) {
 
 // Checks whether the first free block's next and prev point to itself;
 // if yes, then it must be the sole remaining free block
+// Pre: "memory" is initialized; free_list_ptr is valid
+// Post: return (boolean)TRUE/FALSE
 static boolean oneFreeBlockRemaining(void) {
-    free_header_t *start = (free_header_t *) (memory + free_list_ptr);
-    free_header_t *next = (free_header_t *) (memory + start->next);
-    free_header_t *prev = (free_header_t *) (memory + start->prev);
-    return ((next == start) && (prev == start));
+    assert(memory != NULL);
+    free_header_t *listPtr = (free_header_t *) (memory + free_list_ptr);
+    assert(listPtr->magic == MAGIC_FREE);
+    return ((free_list_ptr == listPtr->next) && (free_list_ptr == listPtr->prev));
 }
 
 static void mergeLink(free_header_t *before, free_header_t *obj, free_header_t *after) {
