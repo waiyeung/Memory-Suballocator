@@ -37,7 +37,7 @@ typedef struct free_list_header {
     vlink_t prev;       // memory[] index of previous free block
 } free_header_t;
 
-void sal_merge(free_header_t *);
+static void sal_merge(free_header_t *);
 static void mergeLink(free_header_t *, free_header_t *, free_header_t *);
 static void link(free_header_t *, free_header_t *, free_header_t *);
 static boolean oneFreeBlockRemaining(void);
@@ -207,7 +207,7 @@ void sal_free(void *object) {
 }
 
 // obj: the beginning of the block that may be merged
-void sal_merge(free_header_t *obj) {
+static void sal_merge(free_header_t *obj) {
     // if a merge occurs, newObj will point to the finished merged block so sal_merge
     // can be called on it (if applicable) as there may be more possible merges
     free_header_t *newObj = NULL;
