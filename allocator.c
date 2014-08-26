@@ -219,7 +219,7 @@ void sal_merge(free_header_t *obj) {
     
         // if a merge occurs, newId will point to the finished merged block so sal_merge
         // can be called on it (if applicable) as there may be more possible merges
-        void *newId = NULL;
+        free_header_t *newObj = NULL;
         // determine which direction obj MUST merge with (i.e. the one that it split with)
         direction d = getMergeDirection(obj, MEMORY_START, memory_size);
         
@@ -228,19 +228,19 @@ void sal_merge(free_header_t *obj) {
             // obj will be the entry in the free list
             free_header_t *newAfter = (free_header_t *) (memory + afterFree->next);
             mergeLink(beforeFree, obj, newAfter);
-            newId = (void *) obj;
+            newObj = obj;
         } else if (beforeFreeMergeable && (d == BEFORE)) {
             // i.e. beforeFree will be merged
             // mergeTarget/beforeFree will now the entry in the free list
             free_header_t *newBefore = (free_header_t *) (memory + beforeFree->prev);
             mergeLink(newBefore, beforeFree, afterFree);
-            newId = (void *) beforeFree;
+            newObj = beforeFree;
         }
         
         // recursively call sal_merge until there are no longer any merge-able blocks
         // or it is the sole remaining free block
-        if ((newId != NULL) && (!oneFreeBlockRemaining())) {
-            sal_merge(newId);
+        if ((newObj != NULL) && (!oneFreeBlockRemaining())) {
+            sal_merge(newObj);
         }     
     }    
 }
