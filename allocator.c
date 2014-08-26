@@ -50,10 +50,10 @@ static vsize_t memory_size;      // number of bytes malloc'd in memory[]
 
 void sal_init(u_int32_t size) {
     // Do nothing if allocator has already been initiated
-    if (memory == NULL) {
+    if (memory == NULL || size <= HEADER_SIZE) {
 
         // Convert size to a power of two if it isn't already 
-        // the smallest that is larger than both the input size and HEADER_SIZE
+        // & at least as large as the input "size"
         memory_size = HEADER_SIZE;
         while (memory_size < size) {
             memory_size *= 2;
@@ -75,11 +75,13 @@ void sal_init(u_int32_t size) {
         header->next = FREE_PTR_START;
         header->prev = FREE_PTR_START;
     }
+
 }
 
 void *sal_malloc(u_int32_t n) {
     // The size of every region must be a power of two and greater than 4 bytes
     if (n <= MIN_REGION_SIZE) {
+        fprintf(stderr, "Requested size too small. Use size larger then %d bytes.", MIN_REGION_SIZE);
         abort();
     }
 
@@ -153,7 +155,7 @@ void *sal_malloc(u_int32_t n) {
             returnValue = (void *) ((byte *)target + HEADER_SIZE); 
         }
     } 
-    sal_stats();
+
     return returnValue;  
 }
 
