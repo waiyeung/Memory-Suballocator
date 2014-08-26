@@ -79,32 +79,32 @@ void sal_init(u_int32_t size) {
 }
 
 void *sal_malloc(u_int32_t n) {
-    // The size of every region must be a power of two and greater than 4 bytes
-    if (n <= MIN_REGION_SIZE) {
-        fprintf(stderr, "Requested size too small. Use size larger then %d bytes.", MIN_REGION_SIZE);
-        abort();
-    }
 
-    // actual size required including header
+    // "memSize" : actual size required including header
     vsize_t memSize = n + HEADER_SIZE;    
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
     free_header_t *curr = startpoint;
     free_header_t *target = NULL;
-    
-    // traverse the entire free list trying to find the smallest region that will
-    // fit memSize
-    do {
-        if (curr->magic != MAGIC_FREE) {
-            fprintf(stderr, "Memory corruption");
-            abort();
-        }
-        if (curr->size >= memSize && (target == NULL || curr->size < target->size)) {
-            target = curr;
-        }
-        curr = (free_header_t *)(memory + curr->next);
-    } while (curr != startpoint);
-
     void *returnValue = NULL;
+
+    // The size of every region must be a power of two and greater than 4 bytes
+    if (n <= MIN_REGION_SIZE) {
+        fprintf(stderr, "Requested size too small. Use size larger then %d bytes.", MIN_REGION_SIZE);
+    } else {
+        // traverse the entire free list trying to find the smallest region that will
+        // fit memSize
+        do {
+            if (curr->magic != MAGIC_FREE) {
+                fprintf(stderr, "Memory corruption");
+                abort();
+            }
+            if (curr->size >= memSize && (target == NULL || curr->size < target->size)) {
+                target = curr;
+            }
+            curr = (free_header_t *)(memory + curr->next);
+        } while (curr != startpoint);
+    }
+
     
     // only if there is a memory region that will fit memSize
     // return NULL if (target == NULL)
@@ -316,7 +316,7 @@ void sal_end(void) {
 }
 
 void sal_stats(void) {
-    printf("\nsal_stats\n");
+    printf("\n>>>>>>>>>>>>>>>>>>>>sal_stats>>>>>>>>>>>>>>>>>>>>\n");
     printf("\n--Gobal variables--\n");
     printf("memory: %p\n", memory);
     printf("free_list_ptr: %u\n", free_list_ptr);
@@ -328,8 +328,9 @@ void sal_stats(void) {
     printf("<START>\n");
     do
     {
-        printf("Index-->%u size: %u, next: %u, prev: %u\n", (unsigned int) ((byte *) curr - memory), curr->size, curr->next, curr->prev);
+        printf("%u --> size: %u, next: %u, prev: %u\n", (unsigned int) ((byte *) curr - memory), curr->size, curr->next, curr->prev);
         curr = (free_header_t *) (memory + curr->next);
     } while(curr != startpoint);
     printf("<END>\n");
+    printf("\n<<<<<<<<<<<<<<<<<<<<sal_stats<<<<<<<<<<<<<<<<<<<<\n");
 }
