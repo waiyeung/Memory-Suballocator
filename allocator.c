@@ -133,7 +133,7 @@ void *sal_malloc(u_int32_t n) {
 
         // continue only if there are more than 1 free regions after splitting
         // otherwise return default value of returnValue which is NULL
-        if ((target->next != targetAddr) && (target->prev != targetAddr)) {
+        if (oneFreeBlockRemaining() == FALSE) {
      
             target->magic = MAGIC_ALLOC;
             
@@ -162,8 +162,7 @@ void *sal_malloc(u_int32_t n) {
 void sal_free(void *object) {
     //create a pointer and index to the region
     free_header_t *obj = (free_header_t *) ((byte *) object - HEADER_SIZE);
-    vaddr_t objAddr = ((byte *) obj) - memory;
-    printf("%u\n", objAddr);
+    vaddr_t objAddr = (vaddr_t) (((byte *) obj) - memory);
 
     //check magic number to ensure freeing valid memory
     if (obj->magic != MAGIC_ALLOC) {
@@ -175,30 +174,35 @@ void sal_free(void *object) {
     // then set prev to be the free block before object
     free_header_t *before = NULL;
     free_header_t *after = (free_header_t *) (memory + free_list_ptr);
-    // no need to worry about infinite looping as we will not be freeing the sole
-    // remaining free block (i.e. after != obj)
-    // the prev < after is there to know when we have wrapped around
-    while ((after <= obj) && (before < after)) {
-        before = after;
-        after = (free_header_t *) (memory + after->next);
-    }
-    if (before == NULL) {
-        // i.e. obj is before the first free block
-        before = (free_header_t *) (memory + after->prev);
-    }    
-    
-    // link in the deallocated block into the free list
-    link(before, obj, after);
-    
-    // we keep free_list_ptr to be the earliest free block so that our beforeFree and afterFree
-    // loops work correctly (in sal_merge and sal_free) 
+
+    // check if the object is locate before all the regions in the free list
     if (objAddr < free_list_ptr) {
+
+        before = (free_header_t *) (memory + after->prev);
+
+        // we keep free_list_ptr to be the earliest free block so that our beforeFree and afterFree
+        // loops work correctly (in sal_merge and sal_free) 
         free_list_ptr = objAddr;
+
+    } else {
+
+        // no need to worry about infinite looping as we will not be freeing the sole
+        // remaining free block (i.e. after != obj)
+        // the before < after is there to know when we have wrapped around
+        while ((after < obj) && (before < after)) {
+            before = after;
+            after = (free_header_t *) (memory + after->next);
+        }
+
     }
-    
+
     // 'deallocate' the memory block
     obj->magic = MAGIC_FREE;
 
+    // link back to the deallocated block into the free list
+    link(before, obj, after);
+
+    // merge back into larger a block
     sal_merge(obj);
 }
 
@@ -211,34 +215,29 @@ void sal_merge(free_header_t *obj) {
     // the free blocks before and after obj (which is free itself)
     free_header_t *beforeFree = (free_header_t *) (memory + obj->prev);
     free_header_t *afterFree = (free_header_t *) (memory + obj->next);
-    
-    vaddr_t beforeFreeAddr = (byte *) beforeFree - memory;
-    vaddr_t afterFreeAddr = (byte *) afterFree - memory;
       
     // beforeFree or afterFree will only be mergeable if their size is equal to obj's size
     // and if they are directly adjacent in terms of memory position
-    boolean beforeFreeMergeable = (beforeFree->size == obj->size) &&
-        (((byte *) memory + (beforeFreeAddr + beforeFree->size )) == (byte *) obj);      
-    boolean afterFreeMergeable = (afterFree->size == obj->size) &&
-        (((byte *) memory + (afterFreeAddr - obj->size)) == (byte *) obj);
-    
-    if (beforeFreeMergeable || afterFreeMergeable) {    
-        // determine which direction obj MUST merge with (i.e. the one that it split with)
-        direction d = getMergeDirection(obj, MEMORY_START, memory_size);
-        
-        if (afterFreeMergeable && (d == AFTER)) {            
-            // i.e. afterFree will be merged as mergeTarget > obj
+    if (((byte *) beforeFree + obj->size ) == (byte *) obj) {
+
+        if (getMergeDirection(obj, MEMORY_START, memory_size) == AFTER) {            
+            // i.e. afterFree will be merged into obj as mergeTarget > obj
             // obj will be the entry in the free list
             free_header_t *newAfter = (free_header_t *) (memory + afterFree->next);
             mergeLink(beforeFree, obj, newAfter);
             newId = (void *) obj;
-        } else if (beforeFreeMergeable && (d == BEFORE)) {
+        }
+
+    } else if (((byte *) afterFree - afterFree->size) == (byte *) obj){
+
+        if (getMergeDirection(obj, MEMORY_START, memory_size) == BEFORE) {
             // i.e. beforeFree will be merged
             // mergeTarget/beforeFree will now the entry in the free list
             free_header_t *newBefore = (free_header_t *) (memory + beforeFree->prev);
             mergeLink(newBefore, beforeFree, afterFree);
             newId = (void *) beforeFree;
-        }       
+        }
+
     }
     
     // recursively call sal_merge until there are no longer any merge-able blocks
@@ -274,11 +273,13 @@ static void mergeLink(free_header_t *before, free_header_t *obj, free_header_t *
 
 // helper function to link before, obj, and after in the free list
 static void link(free_header_t *before, free_header_t *obj, free_header_t *after) {
+    assert (before != NULL && obj != NULL && after != NULL);
+    assert (before->magic == MAGIC_FREE && obj->magic == MAGIC_FREE && after->magic == MAGIC_FREE);
+
     vlink_t objLink = (vlink_t) ((byte *) obj - memory);
-    vlink_t beforeLink = (vlink_t) ((byte *) before - memory);
-    vlink_t afterLink = (vlink_t) ((byte *) after - memory);
-    obj->prev = beforeLink;
-    obj->next = afterLink;
+
+    obj->next = before->next;
+    obj->prev = after->prev;
     before->next = objLink;
     after->prev = objLink;
 }
