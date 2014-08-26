@@ -215,28 +215,26 @@ static void sal_merge(free_header_t *obj) {
     // the free blocks before and after obj (which is free itself)
     free_header_t *beforeFree = (free_header_t *) (memory + obj->prev);
     free_header_t *afterFree = (free_header_t *) (memory + obj->next);
-      
+
     // beforeFree or afterFree will only be mergeable if their size is equal to obj's size
     // and if they are directly adjacent in terms of memory position
-    if (((byte *) beforeFree + obj->size ) == (byte *) obj) {
+    if ((((byte *) beforeFree + obj->size ) == (byte *) obj) && 
+        (getMergeDirection(obj, MEMORY_START, memory_size) == AFTER)) {  
 
-        if (getMergeDirection(obj, MEMORY_START, memory_size) == AFTER) {            
             // i.e. afterFree will be merged into obj as mergeTarget > obj
             // obj will be the entry in the free list
             free_header_t *newAfter = (free_header_t *) (memory + afterFree->next);
             mergeLink(beforeFree, obj, newAfter);
             newObj = obj;
-        }
+        
+    } else if ((((byte *) afterFree - afterFree->size) == (byte *) obj) && 
+        (getMergeDirection(obj, MEMORY_START, memory_size) == BEFORE)) {
 
-    } else if (((byte *) afterFree - afterFree->size) == (byte *) obj){
-
-        if (getMergeDirection(obj, MEMORY_START, memory_size) == BEFORE) {
             // i.e. beforeFree will be merged
             // mergeTarget/beforeFree will now the entry in the free list
             free_header_t *newBefore = (free_header_t *) (memory + beforeFree->prev);
             mergeLink(newBefore, beforeFree, afterFree);
             newObj = beforeFree;
-        }
 
     }
     
