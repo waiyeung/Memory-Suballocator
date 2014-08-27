@@ -275,9 +275,11 @@ static void link(free_header_t *before, free_header_t *obj, free_header_t *after
     assert (before->magic == MAGIC_FREE && obj->magic == MAGIC_FREE && after->magic == MAGIC_FREE);
 
     vlink_t objLink = (vlink_t) ((byte *) obj - memory);
+    vlink_t beforeLink = (vlink_t) ((byte *) before - memory);
+    vlink_t afterLink = (vlink_t) ((byte *) after - memory);
 
-    obj->next = before->next;
-    obj->prev = after->prev;
+    obj->next = afterLink;
+    obj->prev = beforeLink;
     before->next = objLink;
     after->prev = objLink;
 }
