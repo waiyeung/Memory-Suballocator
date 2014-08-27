@@ -41,7 +41,7 @@ static void sal_merge(free_header_t *);
 static void mergeLink(free_header_t *, free_header_t *, free_header_t *);
 static void link(free_header_t *, free_header_t *, free_header_t *);
 static boolean oneFreeBlockRemaining(void);
-static direction getMergeDirection(free_header_t *, vaddr_t, vaddr_t);
+static direction getMergeDirection(free_header_t *);
 
 // Global data
 static byte *memory = NULL;      // pointer to start of suballocator memory
@@ -79,32 +79,39 @@ void sal_init(u_int32_t size) {
 }
 
 void *sal_malloc(u_int32_t n) {
-
+    // The size of every region must be a power of two and greater than 4 bytes
+    if (n <= MIN_REGION_SIZE) {
+        fprintf(stderr, "Requested size too small. Use size larger then %d bytes.", MIN_REGION_SIZE);
+    }
+     
     // "memSize" : actual size required including header
     vsize_t memSize = n + HEADER_SIZE;    
     free_header_t *startpoint = (free_header_t *) (memory + free_list_ptr);
     free_header_t *curr = startpoint;
     free_header_t *target = NULL;
-    void *returnValue = NULL;
-
-    // The size of every region must be a power of two and greater than 4 bytes
-    if (n <= MIN_REGION_SIZE) {
-        fprintf(stderr, "Requested size too small. Use size larger then %d bytes.", MIN_REGION_SIZE);
-    } else {
-        // traverse the entire free list trying to find the smallest region that will
-        // fit memSize
-        do {
-            if (curr->magic != MAGIC_FREE) {
-                fprintf(stderr, "Memory corruption");
-                abort();
-            }
-            if (curr->size >= memSize && (target == NULL || curr->size < target->size)) {
-                target = curr;
-            }
-            curr = (free_header_t *)(memory + curr->next);
-        } while (curr != startpoint);
+    void *returnValue = NULL;     
+       
+    // traverse the entire free list trying to find the smallest region that will
+    // fit memSize
+    if (curr->magic != MAGIC_FREE) {
+        fprintf(stderr, "Memory corruption");
+        abort();
     }
-
+    if (curr->size >= memSize && (target == NULL || curr->size < target->size)) {
+        target = curr;
+    }
+    curr = (free_header_t *)(memory + curr->next);
+     
+    while (curr != startpoint) {
+        if (curr->magic != MAGIC_FREE) {
+            fprintf(stderr, "Memory corruption");
+            abort();
+        }
+        if (curr->size >= memSize && (target == NULL || curr->size < target->size)) {
+            target = curr;
+        }
+        curr = (free_header_t *)(memory + curr->next);
+    }
     
     // only if there is a memory region that will fit memSize
     // return NULL if (target == NULL)
@@ -185,7 +192,6 @@ void sal_free(void *object) {
         free_list_ptr = objAddr;
 
     } else {
-
         // no need to worry about infinite looping as we will not be freeing the sole
         // remaining free block (i.e. after != obj)
         // the before < after is there to know when we have wrapped around
@@ -228,7 +234,7 @@ static void sal_merge(free_header_t *obj) {
         // can be called on it (if applicable) as there may be more possible merges
         free_header_t *newObj = NULL;
         // determine which direction obj MUST merge with (i.e. the one that it split with)
-        direction d = getMergeDirection(obj, MEMORY_START, memory_size);
+        direction d = getMergeDirection(obj);
         
         if (afterFreeMergeable && (d == AFTER)) {            
             // i.e. afterFree will be merged as mergeTarget > obj
@@ -292,28 +298,23 @@ static void link(free_header_t *before, free_header_t *obj, free_header_t *after
 }
 
 // Returns BEFORE or AFTER depending on which obj needs to merge with.
-// It works by recursively dividing the entire allocated memory block and seeing
-// if objAddr lies on significant points (the beginning or halfway & these 
-// points + obj->size)
-static direction getMergeDirection(free_header_t *obj, vaddr_t begin, vaddr_t end) {
+// It works by assuming the entire memory block is divided into regions of
+// size (obj->size). Then we can see if obj is at an even position or odd postion.
+// If odd, then it merges before and if it's even then it merges with after.
+// It has complexity O(1) and is faster than the previous O(log(n)) 'divide and conquer
+// search'.
+static direction getMergeDirection(free_header_t *obj) {
+    assert(obj != NULL);
+    vaddr_t objAddr = (vaddr_t) ((byte *) obj - memory);
     direction d;
-    vaddr_t halfway = (end - begin) / 2;
-    vaddr_t objAddr = (byte *) obj - memory;
-    if ((objAddr == begin) || (objAddr == halfway)) {
+ 
+    if((objAddr / obj->size) % 2 == 0) {
         d = AFTER;
-    } else if ((objAddr == begin + obj->size) || (objAddr == halfway + obj->size)) {
-        d = BEFORE;
     } else {
-        // if it doesn't lie on significant areas, keep halving the bounded area
-        if (objAddr < halfway) {
-            // in the first half
-            d = getMergeDirection(obj, begin, halfway);
-        } else {
-            // in the second half
-            d = getMergeDirection(obj, (begin + halfway), end);
-        }
+        d = BEFORE;
     }
-    return d; 
+ 
+    return d;
 }   
 
 void sal_end(void) {
