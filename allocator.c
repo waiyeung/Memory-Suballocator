@@ -82,6 +82,7 @@ void *sal_malloc(u_int32_t n) {
     // The size of every region must be a power of two and greater than 4 bytes
     if (n <= MIN_REGION_SIZE) {
         fprintf(stderr, "Requested size too small. Use size larger then %d bytes.", MIN_REGION_SIZE);
+        abort();
     }
      
     // "memSize" : actual size required including header
