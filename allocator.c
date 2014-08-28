@@ -23,10 +23,13 @@
 #define BEFORE 0
 #define AFTER 1
 
-// Pointers algorithms and casting
-#define FH_PtrAdd(ptr, size)    ((free_header_t *) ((byte*)ptr + size))
-#define FH_PtrSub(ptr, size)    ((free_header_t *) ((byte*)ptr - size))
-#define PtrsSub(ptr1, ptr2)     (u_int32_t)((byte*)ptr1 - (byte*)ptr2)
+// Macros for pointers algorithms and casting
+// Prefixes:
+// fh = casted to a free_header_ t *
+// v = casted to vaddr_t/vlink_t
+#define fhPtrAdd(ptr, size)    ((free_header_t *) ((byte *) ptr + size))
+#define fhPtrSub(ptr, size)    ((free_header_t *) ((byte *) ptr - size))
+#define vPtrSub(ptr1, ptr2)     (u_int32_t) ((byte *) ptr1 - (byte *) ptr2)
 
 typedef unsigned char byte;
 typedef u_int32_t vlink_t;
@@ -87,14 +90,12 @@ void sal_init(u_int32_t size) {
 void *sal_malloc(u_int32_t n) {
     // The size of every region must be a power of two and greater than 4 bytes
     if (n <= MIN_REGION_SIZE) {
-        //fprintf(stderr, "Requested size too small. Use size larger then %d bytes.\n", MIN_REGION_SIZE);
-        //return NULL;
         abort();
     }
      
     // "memSize" : actual size required including header
     vsize_t memSize = n + HEADER_SIZE;    
-    free_header_t *startpoint = FH_PtrAdd(memory, free_list_ptr);
+    free_header_t *startpoint = fhPtrAdd(memory, free_list_ptr);
     free_header_t *curr = startpoint;
     free_header_t *target = NULL;
     void *returnValue = NULL;     
@@ -108,7 +109,7 @@ void *sal_malloc(u_int32_t n) {
     if ((curr->size >= memSize) && (target == NULL || curr->size < target->size)) {
         target = curr;
     }
-    curr = FH_PtrAdd(memory, curr->next);
+    curr = fhPtrAdd(memory, curr->next);
      
     while (curr != startpoint) {
         if (curr->magic != MAGIC_FREE) {
@@ -118,7 +119,7 @@ void *sal_malloc(u_int32_t n) {
         if ((curr->size >= memSize) && (target == NULL || curr->size < target->size)) {
             target = curr;
         }
-        curr = FH_PtrAdd(memory, curr->next);
+        curr = fhPtrAdd(memory, curr->next);
     }
     
     // only if there is a memory region that will fit memSize
@@ -126,15 +127,15 @@ void *sal_malloc(u_int32_t n) {
     if (target != NULL) {
      
         // get index to target (from memory[])
-        vaddr_t targetAddr = PtrsSub(target, memory);
+        vaddr_t targetAddr = vPtrSub(target, memory);
         
         // continuously split the target until we get a region that is the power of 2
         // just larger than memSize
         while (target->size >= memSize * 2) {
             // target <-> split <-> after (schematic of memory after split)
             target->size /= 2;
-            free_header_t *split = FH_PtrAdd(target, target->size);            
-            free_header_t *after = FH_PtrAdd(memory, target->next);            
+            free_header_t *split = fhPtrAdd(target, target->size);            
+            free_header_t *after = fhPtrAdd(memory, target->next);            
             
             split->magic = MAGIC_FREE;
             split->size = target->size;
@@ -155,10 +156,10 @@ void *sal_malloc(u_int32_t n) {
             // take out the allocated region from the link by changing the links
             // before and after target
             // curr = the region just before target
-            curr = FH_PtrAdd(memory, target->prev);
+            curr = fhPtrAdd(memory, target->prev);
             curr->next = target->next;
             // curr = the region just after target
-            curr = FH_PtrAdd(memory, target->next);  
+            curr = fhPtrAdd(memory, target->next);  
             curr->prev = target->prev;
             
             // if free_list_ptr is being allocated, it needs to be changed to the next
@@ -167,7 +168,7 @@ void *sal_malloc(u_int32_t n) {
                 free_list_ptr = target->next;
             }
 
-            returnValue = (void *) FH_PtrAdd(target, HEADER_SIZE); 
+            returnValue = (void *) fhPtrAdd(target, HEADER_SIZE); 
         }
     } 
 
@@ -176,8 +177,8 @@ void *sal_malloc(u_int32_t n) {
 
 void sal_free(void *object) {
     //create a pointer and index to the region
-    free_header_t *obj = FH_PtrSub(object, HEADER_SIZE);
-    vaddr_t objAddr = PtrsSub(obj, memory);
+    free_header_t *obj = fhPtrSub(object, HEADER_SIZE);
+    vaddr_t objAddr = vPtrSub(obj, memory);
 
     //check magic number to ensure freeing valid memory
     if (obj->magic != MAGIC_ALLOC) {
@@ -188,12 +189,12 @@ void sal_free(void *object) {
     // traverse the list until after is the next free block after object and 
     // then set prev to be the free block before object
     free_header_t *before = NULL;
-    free_header_t *after = FH_PtrAdd(memory, free_list_ptr);
+    free_header_t *after = fhPtrAdd(memory, free_list_ptr);
 
     // check if the object is locate before all the regions in the free list
     if (objAddr < free_list_ptr) {
 
-        before = FH_PtrAdd(memory, after->prev);
+        before = fhPtrAdd(memory, after->prev);
 
         // we keep free_list_ptr to be the earliest free block so that our beforeFree and afterFree
         // loops work correctly (in sal_merge and sal_free) 
@@ -205,7 +206,7 @@ void sal_free(void *object) {
         // the before < after is there to know when we have wrapped around
         while ((after < obj) && (before < after)) {
             before = after;
-            after = FH_PtrAdd(memory, after->next);
+            after = fhPtrAdd(memory, after->next);
         }
 
     }
@@ -222,8 +223,8 @@ void sal_free(void *object) {
 
 // obj: the beginning of the block that may be merged
 static void sal_merge(free_header_t *obj) {
-    // if a merge occurs, freeObj will point to the finished merged block so sal_merge
-    // can be called on it (if applicable) as there may be more possible merges
+    // if a merge occurs, freeObj will point to the finished merged block so it can
+    // potentially be merged with adjacent free blocks
     free_header_t *freeObj = obj;
 
     // iterate until there are no longer any merge-able blocks
@@ -231,37 +232,34 @@ static void sal_merge(free_header_t *obj) {
     while (freeObj != NULL && oneFreeBlockRemaining() == FALSE) {
 
         // the free blocks before and after freeObj (which is free itself)
-        free_header_t *beforeFree = FH_PtrAdd(memory, freeObj->prev);
-        free_header_t *afterFree = FH_PtrAdd(memory, freeObj->next);
+        free_header_t *beforeFree = fhPtrAdd(memory, freeObj->prev);
+        free_header_t *afterFree = fhPtrAdd(memory, freeObj->next);
       
-        // beforeFree or afterFree will only be mergeable if their size is equal to freeObj's size
-        // and if they are directly adjacent in terms of memory position
+        // beforeFree or afterFree will only be mergeable if their size is equal 
+        // to freeObj's size and if they are directly adjacent in terms of 
+        // memory position
         boolean beforeFreeMergeable = (beforeFree->size == freeObj->size) && 
-            (FH_PtrAdd(beforeFree, freeObj->size) == freeObj);      
+            (fhPtrAdd(beforeFree, freeObj->size) == freeObj);      
         boolean afterFreeMergeable = (afterFree->size == freeObj->size) && 
-            (FH_PtrSub(afterFree, freeObj->size) == freeObj);
-    
+            (fhPtrSub(afterFree, freeObj->size) == freeObj);    
 
         // getMergeDirection() determine which direction freeObj MUST merge with 
         // (i.e. the one that it split with)
         if (afterFreeMergeable == TRUE && (getMergeDirection(freeObj) == AFTER)) {            
             // i.e. afterFree will be merged as mergeTarget > freeObj
             // freeObj will be the entry in the free list
-            free_header_t *newAfter = FH_PtrAdd(memory, afterFree->next);
+            free_header_t *newAfter = fhPtrAdd(memory, afterFree->next);
             mergeLink(beforeFree, freeObj, newAfter);
         } else if (beforeFreeMergeable == TRUE && (getMergeDirection(freeObj) == BEFORE)) {
             // i.e. beforeFree will be merged
             // mergeTarget/beforeFree will now the entry in the free list
-            free_header_t *newBefore = FH_PtrAdd(memory, beforeFree->prev);
+            free_header_t *newBefore = fhPtrAdd(memory, beforeFree->prev);
             mergeLink(newBefore, beforeFree, afterFree);
             freeObj = beforeFree;
         } else {
-            // use break or set freeObj = NULL and check freeObj == NULL in the while
             freeObj = NULL;
         }
-
     }
-
 }
 
 // Checks whether the first free block's next and prev point to itself;
@@ -270,14 +268,14 @@ static void sal_merge(free_header_t *obj) {
 // Post: return (boolean)TRUE/FALSE
 static boolean oneFreeBlockRemaining(void) {
     assert(memory != NULL);
-    free_header_t *listPtr = FH_PtrAdd(memory, free_list_ptr);
+    free_header_t *listPtr = fhPtrAdd(memory, free_list_ptr);
     assert(listPtr->magic == MAGIC_FREE);
     return ((free_list_ptr == listPtr->next) && (free_list_ptr == listPtr->prev));
 }
 
 static void mergeLink(free_header_t *before, free_header_t *obj, free_header_t *after) {
     obj->size *= 2;
-    vlink_t objLink = PtrsSub(obj, memory);
+    vlink_t objLink = vPtrSub(obj, memory);
 
     if (before == obj || after == obj) {
         // there were two free block before merging so there will only be
@@ -294,9 +292,9 @@ static void link(free_header_t *before, free_header_t *obj, free_header_t *after
     assert (before != NULL && obj != NULL && after != NULL);
     assert (before->magic == MAGIC_FREE && obj->magic == MAGIC_FREE && after->magic == MAGIC_FREE);
 
-    vlink_t objLink = PtrsSub(obj, memory);
-    vlink_t beforeLink = PtrsSub(before, memory);
-    vlink_t afterLink = PtrsSub(after, memory);
+    vlink_t objLink = vPtrSub(obj, memory);
+    vlink_t beforeLink = vPtrSub(before, memory);
+    vlink_t afterLink = vPtrSub(after, memory);
 
     obj->next = afterLink;
     obj->prev = beforeLink;
@@ -339,16 +337,16 @@ void sal_stats(void) {
     printf("memory_size: %u\n", memory_size);
 
     printf("\n--Free list--\n");
-    free_header_t *startpoint = FH_PtrAdd(memory, free_list_ptr);
+    free_header_t *startpoint = fhPtrAdd(memory, free_list_ptr);
     free_header_t *curr = startpoint;
     printf("<START>\n");
     printf("%u --> size: %u, next: %u, prev: %u\n",         
-        PtrsSub(curr, memory), curr->size, curr->next, curr->prev);
-    curr = FH_PtrAdd(memory, curr->next);
+        vPtrSub(curr, memory), curr->size, curr->next, curr->prev);
+    curr = fhPtrAdd(memory, curr->next);
     while(curr != startpoint){
         printf("%u --> size: %u, next: %u, prev: %u\n", 
-            PtrsSub(curr, memory), curr->size, curr->next, curr->prev);
-        curr = FH_PtrAdd(memory, curr->next);
+            vPtrSub(curr, memory), curr->size, curr->next, curr->prev);
+        curr = fhPtrAdd(memory, curr->next);
     }
     printf("<END>\n");
     
